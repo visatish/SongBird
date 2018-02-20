@@ -37,8 +37,13 @@ def getAuthorization() :
     r = requests.post('https://accounts.spotify.com/api/token', data={"grant_type": "client_credentials"}, headers={'Authorization': 'Basic ' + encoded}).json()
     if 'error' in r : 
         print(r)
-        quit()
-    TOKEN = r['access_token']
+        return False
+    if 'access_token' in r : 
+        TOKEN = r['access_token']
+        return True
+    else : 
+        print(r)
+        return False
 
 
 # returns json with desired category info for a SINGLE song
@@ -54,7 +59,9 @@ def getSongInfo(uri, category, several=False) :
             time.sleep(wait_time)
             r = requests.get(baseurl + category + "/" + uri, headers=header).json()
         elif (r['error']['status'] == 401) : # access token expired
-            getAuthorization()
+            success = getAuthorization()
+            if not success : 
+                writeToFile()
         else : 
             print(uri, r['error']['status'], r['error']['message'])
             return False
@@ -82,6 +89,16 @@ def getURIList(json_slice_file, plz_clean_uri=True) :
         track_uri_list += [clean_uri(t['track_uri'], plz_clean_uri) for t in tracks]
     return track_uri_list
     
+def writeToFile() : 
+    print("Writing to file", output_file)
+    if willPickle : 
+        with open(output_file, 'wb') as outfile:
+            pickle.dump(json_dict, outfile)
+    else : 
+        with open(output_file, 'w') as outfile:
+            json.dump(json_dict, outfile)
+    print("Successfully written")
+
 # main 
 uri_list = getURIList(input_file)
 num_songs = len(uri_list)
@@ -97,11 +114,4 @@ for i, uri in enumerate(uri_list) :
     json_dict[uri] = {}
     for category in categoryList : 
         json_dict[uri][category] = getSongInfo(uri, category)
-print("Writing to file", output_file)
-if willPickle : 
-    with open(output_file, 'wb') as outfile:
-        pickle.dump(json_dict, outfile)
-else : 
-    with open(output_file, 'w') as outfile:
-        json.dump(json_dict, outfile)
-print("Successfully written")
+writeToFile()
