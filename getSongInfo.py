@@ -9,16 +9,16 @@ client_id = "4790e38147b74e959fab0abe08e300ce"
 client_secret = "761580a6eaf8451db3aabdc10ff46f07"
 
 # get command line args
-willPickle = False
+willPickle = True
 try : 
     input_file = str(sys.argv[1])
     output_file = str(sys.argv[2])
     categories = str(sys.argv[3])
     if len(sys.argv) > 4 : 
-        if "pickle" in str(sys.argv[4]) : 
-            willPickle = True
+        if "json" in str(sys.argv[4]) : 
+            willPickle = False
 except IndexError : 
-    print("Usage:", sys.argv[0], "[json input file] [output file] [comma separated list of categories NO SPACES AFTER COMMAS] [optional: pickle]")
+    print("Usage:", sys.argv[0], "[json input file] [output file] [comma separated list of categories NO SPACES AFTER COMMAS] [optional: json]")
     print("Example: python3", sys.argv[0], "mpd.slice.1000-1999.json slice.1000-1999.data.json tracks,audio-features,audio-analysis pickle")
     quit()
 
