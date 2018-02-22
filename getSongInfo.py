@@ -1,8 +1,9 @@
 import requests, time
 import csv, json, sys, pickle
-import base64
+import base64, os.path
 import pdb
 
+TIMEOUT = 60 # seconds
 baseurl = "https://api.spotify.com/v1/"
 client_id = "4790e38147b74e959fab0abe08e300ce"
 client_secret = "761580a6eaf8451db3aabdc10ff46f07"
@@ -34,7 +35,11 @@ def getAuthorization() :
     global TOKEN
     decoded = client_id + ":" + client_secret
     encoded = stringToBase64(decoded)
-    r = requests.post('https://accounts.spotify.com/api/token', data={"grant_type": "client_credentials"}, headers={'Authorization': 'Basic ' + encoded}).json()
+    try : 
+        r = requests.post('https://accounts.spotify.com/api/token', data={"grant_type": "client_credentials"}, headers={'Authorization': 'Basic ' + encoded}, timeout=TIMEOUT).json()
+    except requests.exceptions.Timeout: 
+        print("request for token timed out")
+        return False
     if 'error' in r : 
         print(r)
         return False
@@ -49,7 +54,11 @@ def getAuthorization() :
 # returns json with desired category info for a SINGLE song
 def getSongInfo(uri, category, several=False) : 
     header = {"'Accept'": "application/json", 'Authorization': 'Bearer ' + TOKEN}
-    r = requests.get(baseurl + category + "/" + uri, headers=header).json()
+    try : 
+        r = requests.get(baseurl + category + "/" + uri, headers=header, timeout=TIMEOUT).json()
+    except requests.exceptions.Timeout: 
+        print("Request for uri", uri, "category", category, "timed out. Skipping.")
+        return 'timed out'
     # handles errors
     while ('error' in r) : 
         # if api overloaded, waits appropriate time
@@ -57,11 +66,15 @@ def getSongInfo(uri, category, several=False) :
             print(r)
             wait_time = r['error']['Retry-After']
             time.sleep(wait_time)
-            r = requests.get(baseurl + category + "/" + uri, headers=header).json()
+            try : 
+                r = requests.get(baseurl + category + "/" + uri, headers=header, timeout=TIMEOUT).json()
+            except requests.exceptions.Timeout:
+                print("Request for uri", uri, "category", category, "timed out. Skipping.")
+                return 'timed out'
         elif (r['error']['status'] == 401) : # access token expired
-            success = getAuthorization()
-            if not success : 
-                writeToFile()
+            print("Authorization token expired, terminating")
+            writeToFile()
+            quit()
         else : 
             print(uri, r['error']['status'], r['error']['message'])
             return False
@@ -105,13 +118,36 @@ num_songs = len(uri_list)
 print("Found", num_songs, "songs in file.")
 
 print("Requesting access token for API calls")
-getAuthorization()
+success = getAuthorization()
+if not success : 
+    print("Spotify API sux")
+    quit()
 print("Access granted. Beginning download")
 
 json_dict = {}
+if os.path.isfile(output_file) : 
+    if 'json' in output_file : 
+        with open(output_file, 'r') as outfile : 
+            json_dict = json.load(outfile)
+    else : 
+        with open(output_file, 'rb') as outfile : 
+            json_dict = pickle.load(outfile)
+num_downloaded = 0
+changed = False
 for i, uri in enumerate(uri_list) : 
     print("Downloading metadata for song", i+1, "out of", num_songs)
-    json_dict[uri] = {}
+    if uri not in json_dict : 
+        json_dict[uri] = {}
     for category in categoryList : 
-        json_dict[uri][category] = getSongInfo(uri, category)
+        if category not in json_dict[uri] : 
+            json_dict[uri][category] = getSongInfo(uri, category)
+            num_downloaded += 1
+            changed = True
+        else : 
+            print("song", uri, "category", category, "present. Skipping.")
+    # write to file every 100 songs
+    if num_downloaded % 100 == 0 and changed : 
+        changed = False
+        writeToFile()
 writeToFile()
+print("Downloaded information for", num_downloaded, "songs")
