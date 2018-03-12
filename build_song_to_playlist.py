@@ -20,16 +20,17 @@ except :
 
 # TODO: if the matrix is taking up too much space, change 'zeros' to a sparse matrix representation
 theMatrix = np.zeros((rows, cols), dtype=bool) # rows are playlists, cols are songs
-index_to_uri = {} # stores uri to index of each song
+uri_to_index = {} # stores uri to index of each song
 latest_index = -1
+num_playlists = 0
 
 def getIndex(uri) : 
     global latest_index
-    if uri in index_to_uri : 
-        return index_to_uri[uri]
+    if uri in uri_to_index : 
+        return uri_to_index[uri]
     else : 
         latest_index += 1
-        index_to_uri[uri] = latest_index
+        uri_to_index[uri] = latest_index
         return latest_index
 
 # removes any text before last occurence of ':' character
@@ -46,6 +47,7 @@ def clean_uri(dirty_uri, wantClean=True) :
 # returns a list of URIs 
 # removes the spotify:track: header if plz_clean_uri is true
 def single_file(json_slice_file, plz_clean_uri=True) : 
+    global num_playlists
     try : 
         the_json = json.load(open(input_path + '/' + json_slice_file))
     except : 
@@ -53,23 +55,35 @@ def single_file(json_slice_file, plz_clean_uri=True) :
         raise()
     playlists = the_json['playlists']
     track_uri_list = []
+    num_playlists += len(playlists)
     for playlist in playlists : 
         playlist_id = playlist['pid']
         tracks = playlist['tracks']
         for track in tracks : 
             uri = clean_uri(track['track_uri'])
             index = getIndex(uri)
-            if playlist_id > len(theMatrix) : 
-                print("Not enough rows to store", playlist_id, "playlists")
-            if index > theMatrix.shape[1] : 
-                print("Not enough columns to store", index, "songs")
-            theMatrix[playlist_id][index] = 1
+            try : 
+                if playlist_id >= len(theMatrix) : 
+                    print("Not enough rows to store", playlist_id, "playlists")
+                if index >= theMatrix.shape[1] : 
+                    print("Not enough columns to store", index, "songs")
+                theMatrix[playlist_id][index] = 1
+            except : 
+                pdb.set_trace()
 
-theMatrix = theMatrix.T
 
 file_list = os.listdir(input_path)
 for f in file_list : 
     if f != ".DS_Store" : 
         single_file(f)
 
-np.savez_compressed(output_file, arr_0=theMatrix, index_to_song=index_to_uri)
+print("Done constructing matrix. Writing to file", output_file)
+print("Final size was", latest_index, "songs", num_playlists, "playlists")
+
+# strips unused playlist rows
+theMatrix = theMatrix[:num_playlists]
+theMatrix = theMatrix.T
+# strips unused song columns (now rows) 
+theMatrix = theMatrix[:latest_index]
+np.savez_compressed(output_file, arr_0=theMatrix, song_to_index=uri_to_index, slices=file_list)
+print("Done writing")
