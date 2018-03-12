@@ -13,13 +13,13 @@ try :
     rows = int(rows)
     cols = int(cols)
 except : 
-    print("Usage:", sys.argv[0], "[slice file] [output file] [no space, comma separated row,col of matrix] [optional: pickle]")
-    print("Example: python3", sys.argv[0], "mpd.slice.1000-1999.json slice.1000-1999.data.json 1000000,100")
+    print("Usage:", sys.argv[0], "[directory that files are in] [output file] [number of playlists],[overestimate of number of songs]")
+    print("Example: python3", sys.argv[0], "data matrix.npz 1000000,1000000000")
     quit()
 
 
 # TODO: if the matrix is taking up too much space, change 'zeros' to a sparse matrix representation
-theMatrix = np.zeros((rows, cols)) # rows are playlists, cols are songs
+theMatrix = np.zeros((rows, cols), dtype=bool) # rows are playlists, cols are songs
 index_to_uri = {} # stores uri to index of each song
 latest_index = -1
 
