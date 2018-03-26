@@ -26,6 +26,7 @@ Abbreviated example (see Appendix section for full example):
 
 # Accessing MongoDB using Python
 [Reference](https://realpython.com/introduction-to-mongodb-and-python/)
+
 Starter code
 ````
 from pymongo import MongoClient
@@ -51,6 +52,7 @@ cursor = collection.find_one({"_id": uri})
 
 # Appendix
 SongInfo collection example document:
+````
 { 
         "_id" : "5IbCV9Icebx8rR6wAp5hhP",
         "tracks" : {
@@ -161,3 +163,4 @@ P5xkahM"
                 "time_signature" : 1
         }
 }
+````
