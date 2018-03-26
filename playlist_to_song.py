@@ -11,5 +11,13 @@ for playlist in data_json['playlists']:
     
     collection.update_one({"_id": playlist['pid']}, # query document with _id = uri
      {
-              "$set":  {'tracks': [track['track_uri'] for track in playlist['tracks']]}# properties you want to change
+              "$set":  {'tracks': [clean_uri(track['track_uri']) for track in playlist['tracks']]}# properties you want to change
          }, upsert=True)
+
+def clean_uri(dirty_uri, wantClean=True) :
+    if not wantClean :
+        return dirty_uri
+    reversed_uri = dirty_uri[::-1]
+    slice_index = reversed_uri.index(':')
+    reversed_clean = reversed_uri[:slice_index]
+    return reversed_clean[::-1]
