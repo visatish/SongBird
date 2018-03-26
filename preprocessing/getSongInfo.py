@@ -1,4 +1,5 @@
 import requests, time
+from pymongo import MongoClient
 import csv, json, sys, pickle
 import base64, os.path
 import pdb
@@ -8,6 +9,9 @@ baseurl = "https://api.spotify.com/v1/"
 client_id = "4790e38147b74e959fab0abe08e300ce"
 client_secret = "761580a6eaf8451db3aabdc10ff46f07"
 
+DATABASE = "metadata"
+COLLECTION = "songInfo"
+CHUNK_SIZE = 50
 # get command line args
 willPickle = True
 try : 
@@ -15,11 +19,11 @@ try :
     output_file = str(sys.argv[2])
     categories = str(sys.argv[3])
     if len(sys.argv) > 4 : 
-        if "json" in str(sys.argv[4]) : 
-            willPickle = False
+        if "pickle" in str(sys.argv[4]) : 
+            willPickle = True
 except IndexError : 
-    print("Usage:", sys.argv[0], "[json input file] [output file] [comma separated list of categories NO SPACES AFTER COMMAS] [optional: json]")
-    print("Example: python3", sys.argv[0], "mpd.slice.1000-1999.json slice.1000-1999.data.json tracks,audio-features,audio-analysis pickle")
+    print("Usage:", sys.argv[0], "[json input file] [mongourl] [comma separated list of categories NO SPACES AFTER COMMAS]")
+    print("Example: python3", sys.argv[0], "mpd.slice.1000-1999.json mongodb://localhost:27017 tracks,audio-features,audio-analysis")
     quit()
 
 categoryList = []
@@ -73,13 +77,41 @@ def getSongInfo(uri, category, several=False) :
                 return 'timed out'
         elif (r['error']['status'] == 401) : # access token expired
             print("Authorization token expired, terminating")
-            writeToFile()
             quit()
         else : 
             print(uri, r['error']['status'], r['error']['message'])
             return False
     return r
 
+# returns json with desired category info for a HUNDRED song
+def getHundredSongInfo(uri, category, several=False) : 
+    header = {"'Accept'": "application/json", 'Authorization': 'Bearer ' + TOKEN}
+    try : 
+        uris_string = ','.join(uri)
+        r = requests.get(baseurl + category + "?ids=" + uris_string, headers=header, timeout=TIMEOUT).json()
+    except requests.exceptions.Timeout: 
+        print("Request for uri", uri, "category", category, "timed out. Skipping.")
+        return 'timed out'
+    # handles errors
+    while ('error' in r) : 
+        # if api overloaded, waits appropriate time
+        if (r['error']['status'] == 429) : # too many requests
+            print(r)
+            wait_time = r['error']['Retry-After']
+            time.sleep(wait_time)
+            try : 
+                r = requests.get(baseurl + category + "/" + uri, headers=header, timeout=TIMEOUT).json()
+            except requests.exceptions.Timeout:
+                print("Request for uri", uri, "category", category, "timed out. Skipping.")
+                return 'timed out'
+        elif (r['error']['status'] == 401) : # access token expired
+            print("Authorization token expired, terminating")
+            quit()
+        else : 
+            print(uri, r['error']['status'], r['error']['message'])
+            return False
+    category = category.replace("-", "_")
+    return r[category]
 # removes any text before last occurence of ':' character
 # such as spotify URI headers like "spotify:track:"
 def clean_uri(dirty_uri, wantClean=True) : 
@@ -102,20 +134,38 @@ def getURIList(json_slice_file, plz_clean_uri=True) :
         track_uri_list += [clean_uri(t['track_uri'], plz_clean_uri) for t in tracks]
     return track_uri_list
     
-def writeToFile() : 
-    print("Writing to file", output_file)
-    if willPickle : 
-        with open(output_file, 'wb') as outfile:
-            pickle.dump(json_dict, outfile)
-    else : 
-        with open(output_file, 'w') as outfile:
-            json.dump(json_dict, outfile)
-    print("Successfully written")
-
+first = True
+def writeToDB(uri_list, data_list, category) : 
+    global collection, first
+    for uri, data in zip(uri_list, data_list) : 
+        if first : 
+            print(uri)
+            first = False
+        collection.update_one({"_id": uri}, {
+            "$set": {category: data}
+        }, upsert=True)
 # main 
 uri_list = getURIList(input_file)
 num_songs = len(uri_list)
 print("Found", num_songs, "songs in file.")
+
+print("Connecting to database at", output_file)
+client = MongoClient(output_file)
+db = client[DATABASE]
+collection = db[COLLECTION]
+print("Connected")
+
+def contains(uri) : 
+    cursor = collection.find_one({"_id": uri})
+    return bool(cursor)
+num_downloaded = 0
+changed = False
+print("Removing already downloaded songs")
+# remove already downloaded songs
+uri_list = [uri for uri in uri_list if not contains(uri)]
+print(len(uri_list), "songs to be downloaded")
+if len(uri_list) == 0 : 
+    quit()
 
 print("Requesting access token for API calls")
 success = getAuthorization()
@@ -123,31 +173,25 @@ if not success :
     print("Spotify API sux")
     quit()
 print("Access granted. Beginning download")
+print("token is", TOKEN)
 
-json_dict = {}
-if os.path.isfile(output_file) : 
-    if 'json' in output_file : 
-        with open(output_file, 'r') as outfile : 
-            json_dict = json.load(outfile)
-    else : 
-        with open(output_file, 'rb') as outfile : 
-            json_dict = pickle.load(outfile)
-num_downloaded = 0
-changed = False
-for i, uri in enumerate(uri_list) : 
-    print("Downloading metadata for song", i+1, "out of", num_songs)
-    if uri not in json_dict : 
-        json_dict[uri] = {}
+# split into chunks of 100 songs
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+gen = chunks(uri_list, CHUNK_SIZE)
+uri_chunks = list(gen)
+num_chunks = len(uri_chunks)
+print("Split into", num_chunks, "chunks")
+
+for i in range(len(uri_chunks)) : 
+    print("Downloading metadata for chunk", i+1, "out of", num_chunks, "in file", input_file)
     for category in categoryList : 
-        if category not in json_dict[uri] : 
-            json_dict[uri][category] = getSongInfo(uri, category)
-            num_downloaded += 1
-            changed = True
-        else : 
-            print("song", uri, "category", category, "present. Skipping.")
-    # write to file every 100 songs
-    if num_downloaded % 100 == 0 and changed : 
-        changed = False
-        writeToFile()
-writeToFile()
-print("Downloaded information for", num_downloaded, "songs")
+        hundred_metadata = getHundredSongInfo(uri_chunks[i], category)
+        writeToDB(uri_chunks[i], hundred_metadata, category)
+# record that the input file has been processed
+db['manage'].insert({"filename": input_file})
+with open('processed_files.sh', 'a') as outfile : 
+    outfile.write(input_file + '\n')
+print("DONE")
