@@ -95,4 +95,10 @@ def getIOUPair(a, b) :
     result = song_to_playlist_collection.aggregate(IOUPipeline).next()
     return result['IOU']
 
+# uncomment this and run "time python3 [this_scriptname]" to
+# get time to run IOU comparisons
+# sd = SongDataset("dataset.npz")
+# print("Finished constructing song dataset")
+# print("Doing", len(sd), "IOU comparisons")
+# print(sd.get_IOU(sd[:], sd[::-1]))
 

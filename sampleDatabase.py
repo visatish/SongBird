@@ -15,7 +15,7 @@ TMP_COLLECTION_NAME = "tmp"
 FEATURES = "danceability,energy,key,loudness,mode,speechiness,acousticness,instrumentalness,liveness,valence,tempo,duration_ms,time_signature,popularity,explicit,release_date"
 features_list = FEATURES.split(',')
 
-DEFAULT_VAL = np.inf
+DEFAULT_VAL = 0
 
 OUTPUT_FILE = "dataset.npz"
 # num: number of uris to sample
@@ -59,7 +59,7 @@ def cleanValue(raw_value_generator) :
         raw_value = next(raw_value_generator) 
     except StopIteration: 
         print("Warning: Feature does not exist")
-        return DEFAULT_VALUE
+        return DEFAULT_VAL
     if type(raw_value) == type(True) : # if value is boolean
         value = int(raw_value)
     elif type(raw_value) == type("") : # if value is string
@@ -114,46 +114,6 @@ def buildDataset(num_samples) :
     np.savez_compressed(OUTPUT_FILE, uris=uris, features=feature_matrix)
     print("done")
 
-buildDataset(1000)
+# example usage
+# buildDataset(10000)
 
-
-######## UNUSED CODE FEEL FREE TO IGNORE #######
-# unused atm, invoke whenever
-# a, b: track uris to get the IOU between
-def getIOU(a, b) : 
-    IOUPipeline = [
-        {
-            "$match": {
-                "_id": { "$in": [a, b] }
-            }
-        },
-        {
-            "$group": {
-                "_id": 0,
-                "size1": { "$first": "$size" },
-                "size2": { "$last": "$size" },
-                "set1": { "$first": "$playlists" },
-                "set2": { "$last": "$playlists" }
-            }
-        },
-        {
-            "$project": { 
-                "intersection": { "$setIntersection": [ "$set1", "$set2" ] }, 
-                "crude_union": { "$add": [ "$size1", "$size2" ] }, 
-                "_id": 0 
-            }
-        },
-        {
-            "$project": {
-                "IOU": {"$divide": [ 
-                    {"$size": "$intersection"}, 
-                        {"$subtract": [
-                            "$crude_union",
-                            {"$size": "$intersection"}
-                        ] }
-                    ]}
-            }
-        }
-    ]
-    result = collection.aggregate(IOUPipeline).next()
-    return result['IOU']
