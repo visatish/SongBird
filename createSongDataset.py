@@ -7,12 +7,19 @@
 # 
 # SongDataset can additionally be used to calculate pairwise IOUs
 # between two sets of uris or Song objects.
+import pymongo
 from pymongo import MongoClient
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 import pdb
 
-client = MongoClient('mongodb://localhost:27017')
+TIMEOUT = 5 # in sec
+client = MongoClient('mongodb://localhost:27017', serverSelectionTimeoutMS=TIMEOUT)
+try:
+    # The ismaster command is cheap and does not require auth.
+    client.admin.command('ismaster')
+except pymongo.errors.ConnectionFailure:
+    print("Server not available")
 database = client['metadata']
 song_to_playlist_collection = database['song_to_playlist_copy']
 FEATURE_COLLECTION = database['songInfo']
@@ -92,12 +99,17 @@ def getIOUPair(a, b) :
             }
         }
     ]
-    result = song_to_playlist_collection.aggregate(IOUPipeline).next()
+    try : 
+        result = song_to_playlist_collection.aggregate(IOUPipeline)
+        result = result.next()
+    except pymongo.errors.ServerSelectionTimeoutError : 
+        print("Cannot connect to database. Start it with command `sudo mongod`")
+        quit()
     return result['IOU']
 
 # uncomment this and run "time python3 [this_scriptname]" to
 # get time to run IOU comparisons
-# sd = SongDataset("dataset.npz")
+# sd = SongDataset("../data/datasets/10000_songs_03_31_18.npz")
 # print("Finished constructing song dataset")
 # print("Doing", len(sd), "IOU comparisons")
 # print(sd.get_IOU(sd[:], sd[::-1]))

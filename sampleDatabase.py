@@ -1,12 +1,20 @@
 # This file samples a prespecified number of samples from the database
-# Gets the corresponding features and writes them to OUTPUT_FILE
+# Gets the corresponding features and writes them to a prespecified file 
+# (default: "dataset.npz")
+import pymongo
 from pymongo import MongoClient
 from sklearn.preprocessing import StandardScaler
 import time, datetime
 import numpy as np
 import pdb
 
-client = MongoClient('mongodb://localhost:27017')
+TIMEOUT = 30 # in seconds
+try : 
+    client = MongoClient('mongodb://localhost:27017', serverSelectionTimeoutMS=TIMEOUT)
+except : 
+    print("Cannot connect to database. Start it with command `sudo mongod`")
+    # print(err)
+    quit()
 database = client['metadata']
 collection = database['song_to_playlist_copy']
 FEATURE_COLLECTION = database['songInfo']
@@ -17,14 +25,17 @@ features_list = FEATURES.split(',')
 
 DEFAULT_VAL = 0
 
-OUTPUT_FILE = "dataset.npz"
 # num: number of uris to sample
 # return a list of num uris representing tracks
 def sampleTracks(num) :
     samplePipeline = [
             { "$sample": { "size": num} }
         ]
-    tracks = collection.aggregate(samplePipeline)
+    try : 
+        tracks = collection.aggregate(samplePipeline)
+    except pymongo.errors.ServerSelectionTimeoutError : 
+        print("Cannot connect to database. Start it with command `sudo mongod`")
+        quit()
     uris = [t['_id'] for t in tracks]
     if len(uris) != num : 
         print("Warning: sampled", num, "tracks but database returned", len(uris), "tracks instead")
@@ -100,7 +111,7 @@ def getFeatureMatrix(uris) :
 #        its corresponding sklearn.preprocessing.StandardScaler    
 #   valid_feature_matrix, valid_feature_scaler: matrix of features and 
 #        its corresponding sklearn.preprocessing.StandardScaler    
-def buildDataset(num_samples) : 
+def buildDataset(num_samples, output_file="dataset.npz") : 
     # samples WITH replacement, but since dataset is so big the chance of 
     # duplicate entries is almost nil
     print("Sampling a total of", num_samples,  "tracks")
@@ -110,10 +121,10 @@ def buildDataset(num_samples) :
     print("Constructing feature matrix")
     feature_matrix = getFeatureMatrix(uris)
     print("Done constructing")
-    print("Writing to file", OUTPUT_FILE)
-    np.savez_compressed(OUTPUT_FILE, uris=uris, features=feature_matrix)
+    print("Writing to file", output_file)
+    np.savez_compressed(output_file, uris=uris, features=feature_matrix)
     print("done")
 
 # example usage
-# buildDataset(10000)
+# buildDataset(100)
 
