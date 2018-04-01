@@ -1,0 +1,48 @@
+### Training Configurations ###
+dataset_dir: 
+output_dir: 
+
+total_pct: 1.0
+train_pct: 0.8
+
+train_bsz: 64
+val_bsz: 16
+
+queue_capacity: 100
+queue_sleep: .01
+
+l2_weight_regularizer: .0005
+base_lr: .01
+decay_step_multiplier: .66
+decay_rate: 0.95
+momentum: 0.9
+drop_rate: 0.0
+
+eval_frequency: -1
+save_frequency: -1
+log_frequency: 1
+
+num_epochs: 25
+
+num_datapoints: 10000
+num_feat: 16
+
+metric_sample_size: 10000
+
+network_config:
+  batch_size: 16
+    num_feat: 16
+
+  architecture:
+    primary_stream:
+      fc1:
+        type: fc1
+        out_size: 1024
+      fc2:
+        type: fc
+        out_size: 512
+      fc3:
+        type: fc
+        final_layer: True
+        out_size: 64
+
