@@ -6,11 +6,11 @@ import os
 import json
 import logging
 
-import numpy
+import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.framework as tcf
 
-class SiameseWeights(object);
+class SiameseWeights(object):
     """ Struct helper for storing weights """
     def __init__(self):
         self.weights = {}
@@ -52,12 +52,12 @@ class SiameseNet(object):
         return self._bsz
 
     @property
-    def num_feat(self)
+    def num_feat(self):
         return self._num_feat
 
     @property 
     def outputs(self):
-        return self._out_1, self.out_2
+        return self._out_1, self._out_2
 
     @property
     def drop_rate_node(self):
@@ -99,7 +99,7 @@ class SiameseNet(object):
         self._feat_mean = np.zeros((self._num_feat,))
         self._feat_std = np.ones((self._num_feat,))
 
-    def _initialize_network(self, feat_1_node=None, feat_2_node=None):
+    def initialize_network(self, feat_1_node=None, feat_2_node=None):
         """ Setup input placeholders and build network """
         with self._graph.as_default():
             if feat_1_node is not None:
@@ -112,8 +112,8 @@ class SiameseNet(object):
                 self._input_drop_rate_node = tf.placeholder_with_default(tf.constant(0.0), ())
 
                 # build networks
-                self._out_1 = self._build_network(self._input_feat_1_node, self._input_drop_rate_node)
-                self._out_2 = self._build_network(self._input_feat_2_node, self._input_drop_rate_node)
+                self._out_1 = self._build_network(self._input_feat_1_node, self._input_drop_rate_node, 'network_1')
+                self._out_2 = self._build_network(self._input_feat_2_node, self._input_drop_rate_node, 'network_2')
                 
                 # create feed tensors for prediction:
                 self._input_feat_1_arr = np.zeros((self._bsz, self._num_feat))
@@ -126,7 +126,7 @@ class SiameseNet(object):
                 self._input_drop_rate_node = tf.placeholder_with_default(tf.constant(0.0), ())
 
                 # build network
-                self._out = self._build_network(self._input_feat_node, self._input_drop_rate_node)
+                self._out = self._build_network(self._input_feat_node, self._input_drop_rate_node, 'inference_net')
 
                 # create feed tensor for prediction:
                 self._input_feat_arr = np.zeros((self._bsz, self._num_feat))
@@ -217,11 +217,11 @@ class SiameseNet(object):
                 self._input_feat_2_arr[:pred_batch_size] = (feat_2_arr[cur_ind:end_ind, ...] - self._feat_mean) / self._feat_std
 
                 # predict
-                preds_1, preds_2 = self._sess.run([self._out_1, self.out_2], feed_dict={self._input_feat_1_node: self._input_feat_1_arr, self._input_feat_2_node: self._input_feat_2_arr})
+                preds_1, preds_2 = self._sess.run([self._out_1, self._out_2], feed_dict={self._input_feat_1_node: self._input_feat_1_arr, self._input_feat_2_node: self._input_feat_2_arr})
 
                 # allocate output tensor if needed
                 if output_arr is None:
-                    output_arr = np.zeros((num_songs, 2) + preds.shape[1:])
+                    output_arr = np.zeros((num_songs, 2) + preds_1.shape[1:])
 
                 output_arr[cur_ind:end_ind, 0] = preds_1[:pred_batch_size]
                 output_arr[cur_ind:end_ind, 1] = preds_2[:pred_batch_size]
@@ -231,10 +231,10 @@ class SiameseNet(object):
     def _leaky_relu(self, x, alpha=0.1):
         return tf.maximum(alpha * x, x)
 
-    def _build_res_layer(self, input_node, fan_in, out_size, drop_rate):
+    def _build_res_layer(self, input_node, fan_in, out_size, drop_rate, name):
         raise NotImplementedError('Residuals have not yet been implemented')
 
-    def _build_fc_layer(self, input_node, fan_in, out_size, drop_rate, final_fc_layer=False):
+    def _build_fc_layer(self, input_node, fan_in, out_size, drop_rate, name, final_fc_layer=False):
         logging.info('Building fully connected layer: {}'.format(name))
 
         # initialize weights
@@ -259,7 +259,7 @@ class SiameseNet(object):
             else:
                 fc = self._leaky_relu(tf.add(tf.matmul(input_node, fcW), fcb))
 
-            fc = tf.nn.dropout(fc, 1 _ drop_rate)
+            fc = tf.nn.dropout(fc, 1 - drop_rate)
 
         return fc, out_size
 
@@ -270,20 +270,20 @@ class SiameseNet(object):
         with tf.name_scope('primary_stream'):
             for layer_idx, (layer_name, layer_config) in enumerate(layers.iteritems()):
                 layer_type = layer_config['type']
-                elif layer_type == 'fc':
+                if layer_type == 'fc':
                     if layer_idx == last_index:
-                        output_node, fan_in = self._build_fc_layer(input_node, fan_in, layer_config['out_size'], drop_rate, final_fc_layer=True)
+                        output_node, fan_in = self._build_fc_layer(output_node, fan_in, layer_config['out_size'], drop_rate, layer_name, final_fc_layer=True)
                     else:
-                        output_node, fan_in = self._build_fc_layer(input_node, fan_in, layer_config['out_size'], drop_rate)
+                        output_node, fan_in = self._build_fc_layer(output_node, fan_in, layer_config['out_size'], drop_rate, layer_name)
                 elif layer_type == 'residual':
-                    output_node, fan_in = self._build_res_layer(input_node, fan_in, layer_config['out_size'], drop_rate,)
+                    output_node, fan_in = self._build_res_layer(output_node, fan_in, layer_config['out_size'], drop_rate, layer_name)
                 else:
                     raise ValueError("Unsupported layer type: {}".format(layer_type))
 
         return output_node, fan_in
 
-    def _build_network(self, input_feat_node, input_drop_rate_node)
-        logging.info('Building Network')
-        with tf.name_scope('network'):
+    def _build_network(self, input_feat_node, input_drop_rate_node, name):
+        logging.info('Building Network: {}'.format(name))
+        with tf.name_scope(name):
             out, fan_out = self._build_primary_stream(input_feat_node, input_drop_rate_node, self._num_feat, self._architecture['primary_stream'])
         return out

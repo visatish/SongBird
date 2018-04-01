@@ -8,9 +8,18 @@ import os
 import signal
 import threading
 import time
+import random
+import collections
+import json
+import sys
+import shutil
 
 import numpy as np
 import tensorflow as tf
+
+from siamese_model import SongDataset
+
+RANDOM_SEED = 123456789
 
 class SiameseNetTrainer(object):
     """ Trains Siamese Net with Tensorflow backend """
@@ -59,7 +68,7 @@ class SiameseNetTrainer(object):
     def _launch_tensorboard(self):
         """ Launches Tensorboard """
         logging.info('Launching Tensorboard, Please navigate to {} in your favorite web browser to view summaries'.format(self._tensorboard_port))
-        os.system('tensorboard --logdir={} &>/dev/null &'.format(self._summary_dir))
+        os.system('tensorboard --logdir={} --port={} &>/dev/null &'.format(self._summary_dir, self._tensorboard_port))
 
     def _close_tensorboard(self):
         """ Closes Tensorboard """
@@ -74,25 +83,25 @@ class SiameseNetTrainer(object):
 
     def _train(self):
         """ Perform Optimization """
-        train_start_time = time.time()
+        start_time = time.time()
 
         # run setup
         self._setup()
 
         # build training networks
         self._net.initialize_network(self._input_feat_1, self.input_feat_2)
-        self._out_1, self.out_2 = self._net.outputs
+        self._out_1, self._out_2 = self._net.outputs
         self._drop_rate_node = self._net.drop_rate_node
 
         # create Tensorflow Saver
         self._saver = tf.train.Saver()
 
         # form loss
-        with tf.name_scope('loss')
+        with tf.name_scope('loss'):
             # part 1: loss func
             loss = self._create_loss()
             # part 2: weight regularization
-            with tf.name_scope('weight regularization')
+            with tf.name_scope('weight_regularization'):
                 layer_weights = self._weights.values()
                 regularizer = tf.nn.l2_loss(layer_weights[0])
                 for w in layer_weights[1:]:
@@ -129,7 +138,7 @@ class SiameseNetTrainer(object):
 
             # pause and wait for queue thread to exit before continuing
             logging.info('Waiting for Queue Thread to Exit...')
-            while not self.queue_thread_exited:
+            while not self._queue_thread_exited:
                 pass
 
             logging.info('Cleaning and Preparing to Exit Optimization...')
@@ -137,8 +146,8 @@ class SiameseNetTrainer(object):
             # cleanup
             for layer_weights in self._weights.values():
                 del layer_weights
-            del self.saver
-            del self.sess
+            del self._saver
+            del self._sess
 
             # exit
             logging.info('Exiting Optimization')
@@ -154,11 +163,12 @@ class SiameseNetTrainer(object):
         # begin optimization loop
         try:
             self._queue_thread = threading.Thread(target=self._load_and_enqueue)
+            logging.info('Starting prefetch queue thread...')
             self._queue_thread.start()
 
             # initialize all Tensorflow global variables
             global_init = tf.global_variables_initializer()
-            self._sess.run(init)
+            self._sess.run(global_init)
 
             logging.info('Beginning Optimization...')
 
@@ -169,13 +179,14 @@ class SiameseNetTrainer(object):
                 self._check_dead_queue()
 
                 # fprop + bprop
-                _, l, lr, preds_1, preds_2, batch_labels = self._sess.run([optimizer, loss, lr, self._out_1, self._out_2, self._train_labels_node], feed_dict={self._drop_rate_node: self._drop_rate})
+                _, l, lr, global_step, preds_1, preds_2, batch_labels = self._sess.run([optimization_op, loss, learning_rate, g_step, self._out_1, self._out_2, self._train_labels], feed_dict={self._drop_rate_node: self._drop_rate})
+                print(global_step)
 
                 # log 
                 if step % self._log_frequency == 0:
                     elapsed_time = time.time() - start_time
                     start_time = time.time()
-                    logging.info('Step {} (epoch {:.2f}), {:.1f} s'.format(step, float(step) * self._train_bsz / self._num_train, 1000 * elapsed_time / self.log_frequency))
+                    logging.info('Step {} (epoch {:.2f}), {:.1f} ms'.format(step, float(step) * self._train_bsz / self._num_train, 1000 * elapsed_time / self._log_frequency))
                     logging.info('Minibatch loss: {:.3f}, learning rate: {:.6f}'.format(l, lr))
 
                 # update Tensorflow summaries
@@ -183,7 +194,7 @@ class SiameseNetTrainer(object):
 
                 # evaluate validation error
                 if step % self._eval_frequency == 0:
-                    val_error = self._error_rate_in_batches()
+                    val_error = self._get_val_error()
                     self._summary_writer.add_summary(self._sess.run(self._merged_val_summary_op, feed_dict={self._val_error_placeholder: val_error}))
                     logging.info('Validation error: {:.3f}'.format(val_error))
 
@@ -243,15 +254,15 @@ class SiameseNetTrainer(object):
 
     def _save_indices(self, train_idcs, val_idcs, train_fname, val_fname):
         """ Save training and validation indices """
-        np.savez_compressed(train_fname, train_idcs)
-        np.savez_compressed(val_fname, val_idcs)
+        np.savez_compressed(self._experiment_path_gen(train_fname), train_idcs)
+        np.savez_compressed(self._experiment_path_gen(val_fname), val_idcs)
 
     def _compute_indices(self):
         """ Computes training and validation indices """
         logging.info('Computing training and validation indices...')
 
-        train_idcs_fname = 'train_indices.pkl'
-        val_idcs_fname = 'val_indices.pkl'
+        train_idcs_fname = 'train_indices.npz'
+        val_idcs_fname = 'val_indices.npz'
 
         self._num_total = int(self._total_pct * self._num_datapoints)
         self._num_train = int(self._train_pct * self._num_total)
@@ -286,7 +297,7 @@ class SiameseNetTrainer(object):
 
         # calculate mean and std
         self._feat_mean = np.mean(feat, axis=0)
-        self._feat_std = np.sqrt(np.mean(np.square(self.feat - self._feat_mean), axis=0))
+        self._feat_std = np.sqrt(np.mean(np.square(feat - self._feat_mean), axis=0))
 
         np.save(feat_mean_fname, self._feat_mean)
         np.save(feat_std_fname, self._feat_std)
@@ -297,14 +308,14 @@ class SiameseNetTrainer(object):
     def _setup_summaries(self):
         logging.info('Setting up Tensorflow summaries...')
         """ Sets up placeholders for summary values and creates summary writer """
-        self._val_error_placeholder = tf.placeholders(tf.float32, ())
+        self._val_error_placeholder = tf.placeholder(tf.float32, ())
         self._minibatch_loss_placeholder = tf.placeholder(tf.float32, ())
         self._minibatch_lr_placeholder = tf.placeholder(tf.float32, ())
 
         # create summary scalars with tags to group summaries that are logged at the same interval together
-        tf.summary_scalar('val_error', self._val_error_placeholder, collections=['eval_frequency'])
-        tf.summary_scalar('minibatch_loss', self._minibatch_loss_placeholder, collections='log_frequency')
-        tf.summary_scalar('minibatch_lr', self._minibatch_lr_placeholder, collections='log_frequency')
+        tf.summary.scalar('val_error', self._val_error_placeholder, collections=['eval_frequency'])
+        tf.summary.scalar('minibatch_loss', self._minibatch_loss_placeholder, collections=['log_frequency'])
+        tf.summary.scalar('minibatch_lr', self._minibatch_lr_placeholder, collections=['log_frequency'])
 
         # create merged summary ops for convenience
         self._merged_train_summary_op = tf.summary.merge_all('log_frequency')
@@ -341,7 +352,7 @@ class SiameseNetTrainer(object):
             self._weights = self._net.get_weights()
 
             # open a tf Session for the network and store it as self._sess
-            self._sess = sels._net.open_session()
+            self._sess = self._net.open_session()
 
             # set up term event/dead event
             self._term_event = threading.Event()
@@ -370,6 +381,7 @@ class SiameseNetTrainer(object):
         self._queue_sleep = self._cfg['queue_sleep']
 
         self._l2_weight_regularizer = self._cfg['l2_weight_regularizer']
+        self._loss_reg_coeff = self._cfg['loss_regularizer']
         self._base_lr = self._cfg['base_lr']
         self._decay_step_multiplier = self._cfg['decay_step_multiplier']
         self._decay_rate = self._cfg['decay_rate']
@@ -377,6 +389,8 @@ class SiameseNetTrainer(object):
         self._drop_rate = self._cfg['drop_rate']
 
         self._metric_sample_size = self._cfg['metric_sample_size']
+
+        self._tensorboard_port = self._cfg['tensorboard_port']
 
     def _read_data_params(self):
         """ Read data params from config file """
@@ -436,8 +450,8 @@ class SiameseNetTrainer(object):
         shutil.copyfile(this_filename, out_train_filename)
 
     def _get_decay_step(self, train_pct, num_total_datapoints, decay_step_multiplier):
-        num_steps_in_epoch = int(train_pct * num_total_datapoints / self._train_bsz)
-        return decay_step_multiplier * num_steps_in_epoch
+        num_steps_in_epoch = train_pct * num_total_datapoints
+        return int(decay_step_multiplier * num_steps_in_epoch)
     
     def _open_song_dataset(self):
         """ Opens a SongDataset """
@@ -459,7 +473,7 @@ class SiameseNetTrainer(object):
         self._forceful_exit = False
 
         # setup output directories
-        output_dir = self.cfg['output_dir']
+        output_dir = self._cfg['output_dir']
         self._experiment_dir, self._summary_dir = self._setup_output_dirs(output_dir)
 
         # create python lambda function to help create file paths to experiment_dir
@@ -541,21 +555,21 @@ class SiameseNetTrainer(object):
     def _get_val_error(self):
         """ Computes validation error """
          
-         # sample indices
-         num_samples = self._val_idcs.shape[0]
-         feat_1_idcs = np.random.choice(self._val_idcs, size=num_samples)
-         feat_2_idcs = np.random.choice(self._val_idcs, size=num_samples)
+        # sample indices
+        num_samples = self._val_idcs.shape[0]
+        feat_1_idcs = np.random.choice(self._val_idcs, size=num_samples)
+        feat_2_idcs = np.random.choice(self._val_idcs, size=num_samples)
 
-         # allocate tensors
-         feat_1 = np.zeros((num_samples, self._num_feat))
-         feat_2 = np.zeros((num_samples, self._num_feat))
-         labels = np.zeros((num_samples,))
+        # allocate tensors
+        feat_1 = np.zeros((num_samples, self._num_feat))
+        feat_2 = np.zeros((num_samples, self._num_feat))
+        labels = np.zeros((num_samples,))
 
-         # load from dataset
-         feat_1_songs = self._dataset[feat_1_idcs.tolist()]
-         feat_2_songs = self._dataset[feat_2_idcs.tolist()]
-         pairwise_ious = self._dataset.get_IOU(feat_1_songs, feat_2_songs)
-         for i in range(num_samples):
+        # load from dataset
+        feat_1_songs = self._dataset[feat_1_idcs.tolist()]
+        feat_2_songs = self._dataset[feat_2_idcs.tolist()]
+        pairwise_ious = self._dataset.get_IOU(feat_1_songs, feat_2_songs)
+        for i in range(num_samples):
             feat_1[i, ...] = feat_1_songs[i].features
             feat_2[i, ...] = feat_2_songs[i].features
             labels[i] = pairwise_ious[i]
@@ -564,4 +578,4 @@ class SiameseNetTrainer(object):
         preds = self._net.predict(feat_1, feat_2)
 
         # calculate error as || iou - || x1 - x2 ||^2 ||^2
-        return np.mean(np.square(labels - np.square(np.linalg.norm(feat_1 - feat_2, axis=1))))
+        return np.mean(np.square(labels - np.square(np.linalg.norm(preds[:, 0] - preds[:, 1], axis=1))))

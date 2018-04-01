@@ -1,6 +1,6 @@
 ### Training Configurations ###
-dataset_dir: 
-output_dir: 
+dataset_dir: /home/ec2-user/data/datasets/10000_songs_03_31_18.npz
+output_dir: /home/ec2-user/data/models/
 
 total_pct: 1.0
 train_pct: 0.8
@@ -11,8 +11,10 @@ val_bsz: 16
 queue_capacity: 100
 queue_sleep: .01
 
+optimizer: momentum
 l2_weight_regularizer: .0005
-base_lr: .01
+loss_regularizer: 1.0
+base_lr: .001
 decay_step_multiplier: .66
 decay_rate: 0.95
 momentum: 0.9
@@ -27,16 +29,20 @@ num_epochs: 25
 num_datapoints: 10000
 num_feat: 16
 
-metric_sample_size: 10000
+metric_sample_size: 8000
+
+tensorboard_port: 6006
+
+debug: 1
 
 network_config:
   batch_size: 16
-    num_feat: 16
+  num_feat: 16
 
   architecture:
     primary_stream:
       fc1:
-        type: fc1
+        type: fc
         out_size: 1024
       fc2:
         type: fc

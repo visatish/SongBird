@@ -5,9 +5,11 @@ Author: Vishal Satish
 import time
 import logging
 import yaml
+import sys
+import os
 
-from network import SiameseNet
-from trainer import SiameseNetTrainer
+sys.path.insert(1, os.path.join(sys.path[0], '..'))
+from siamese_model import SiameseNet, SiameseNetTrainer
 
 # declare any enums and constants
 CONFIG_FILE = 'cfg/training.yaml'
