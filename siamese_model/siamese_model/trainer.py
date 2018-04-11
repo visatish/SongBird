@@ -34,9 +34,15 @@ class SiameseNetTrainer(object):
         || lambda * iou - || x1 - x2 ||^2 ||^2
         """
         with tf.name_scope('loss_function'):
-            loss = tf.reduce_mean(tf.square(tf.subtract(tf.multiply(self._loss_reg_coeff, self._train_labels), tf.square(tf.norm(tf.subtract(self._out_1, self._out_2), axis=1)))))
-        return loss
-
+            self._loss_diff_norm = tf.norm(tf.subtract(self._out_1, self._out_2), axis=1)
+            self._loss_diff_norm_sq = tf.square(self._loss_diff_norm)
+            self._loss_reg_labels = tf.multiply(self._loss_reg_coeff, self._train_labels)
+            self._loss_sub_full = tf.subtract(self._loss_diff_norm_sq, self._loss_reg_labels)
+            self._loss_full_sq = tf.abs(self._loss_sub_full)
+            self._loss_red = tf.reduce_mean(self._loss_full_sq)
+            loss = tf.reduce_mean(tf.abs(tf.subtract(tf.multiply(self._loss_reg_coeff, self._train_labels), tf.square(tf.norm(tf.subtract(self._out_1, self._out_2), axis=1)))))
+        return self._loss_red
+ 
     def _create_optimizer(self, loss, g_step, var_list, lr):
         """
         Builds Optimizer
@@ -89,7 +95,7 @@ class SiameseNetTrainer(object):
         self._setup()
 
         # build training networks
-        self._net.initialize_network(self._input_feat_1, self.input_feat_2)
+        self._net.initialize_network(self._input_feat_1, self._input_feat_2)
         self._out_1, self._out_2 = self._net.outputs
         self._drop_rate_node = self._net.drop_rate_node
 
@@ -118,6 +124,7 @@ class SiameseNetTrainer(object):
         # create optimizer
         with tf.name_scope('optimizer'):
             optimization_op, optimizer = self._create_optimizer(loss, g_step, train_vars, learning_rate)
+        self._fc1_W_grad = optimizer.compute_gradients(loss, train_vars)[3][0]
 
         # define handler func for data prefetch thread
         def handler(signum, frame):
@@ -179,8 +186,17 @@ class SiameseNetTrainer(object):
                 self._check_dead_queue()
 
                 # fprop + bprop
-                _, l, lr, global_step, preds_1, preds_2, batch_labels = self._sess.run([optimization_op, loss, learning_rate, g_step, self._out_1, self._out_2, self._train_labels], feed_dict={self._drop_rate_node: self._drop_rate})
-                print(global_step)
+                _, l, lr, global_step, preds_1, preds_2, input_feat_1, input_feat_2, batch_labels, l_1, l_2, l_3, l_4, l_5, l_6, w, b, grad = self._sess.run([optimization_op, loss, learning_rate, g_step, self._out_1, self._out_2, self._input_feat_1, self._input_feat_2, self._train_labels, self._loss_diff_norm, self._loss_diff_norm_sq, self._loss_reg_labels, self._loss_sub_full, self._loss_full_sq, self._loss_red, self._weights.values()[0], self._weights.values()[1], self._fc1_W_grad], feed_dict={self._drop_rate_node: self._drop_rate})
+                
+                if self._debug:
+                    logging.info('Pred 1: {}'.format(preds_1))
+                    logging.info('Pred 2: {}'.format(preds_2))
+                    logging.info('Input feat 1: {}'.format(input_feat_1))
+                    logging.info('Input feat 2: {}'.format(input_feat_2))
+                    logging.info('IOU: {}'.format(batch_labels))
+                    logging.info('Loss P1: {}, Loss P2: {}, Loss P3: {}, Loss P4: {}, Loss P5: {}, Loss P6: {}'.format(l_1, l_2, l_3, l_4, l_5, l_6))
+                    logging.info('W: {}, b: {}'.format(w, b))
+                    logging.info('FC1 W Grad: {}'.format(grad))
 
                 # log 
                 if step % self._log_frequency == 0:
@@ -207,6 +223,10 @@ class SiameseNetTrainer(object):
                 if not self._tensorboard_has_launched:
                     self._tensorboard_has_launched = True
                     self._launch_tensorboard()
+                
+                # slow training down if debugging for ease of viewing
+                if self._debug: 
+                    time.sleep(0.1)
 
             # get final validation error
             val_error = self._get_val_error()
@@ -346,7 +366,7 @@ class SiameseNetTrainer(object):
         with tf.name_scope('prefetch_queue'):
             self._prefetch_queue = tf.FIFOQueue(self._queue_cap, (tf.float32, tf.float32, tf.float32), shapes=[(self._train_bsz, self._num_feat), (self._train_bsz, self._num_feat), (self._train_bsz,)])
             self._enqueue_op = self._prefetch_queue.enqueue([self._input_feat_1_queue_batch, self._input_feat_2_queue_batch, self._input_labels_queue_batch])
-            self._input_feat_1, self.input_feat_2, self._train_labels = self._prefetch_queue.dequeue()
+            self._input_feat_1, self._input_feat_2, self._train_labels = self._prefetch_queue.dequeue()
 
             # get network weights
             self._weights = self._net.get_weights()

@@ -5,16 +5,16 @@ output_dir: /home/ec2-user/data/models/
 total_pct: 1.0
 train_pct: 0.8
 
-train_bsz: 64
+train_bsz: 1
 val_bsz: 16
 
 queue_capacity: 100
 queue_sleep: .01
 
 optimizer: momentum
-l2_weight_regularizer: .0005
+l2_weight_regularizer: 0.0005
 loss_regularizer: 1.0
-base_lr: .001
+base_lr: 0.0001
 decay_step_multiplier: .66
 decay_rate: 0.95
 momentum: 0.9
@@ -31,24 +31,24 @@ num_feat: 16
 
 metric_sample_size: 8000
 
-tensorboard_port: 6006
+tensorboard_port: 6009
 
-debug: 1
+debug: 0
 
 network_config:
-  batch_size: 16
+  batch_size: 1
   num_feat: 16
 
   architecture:
     primary_stream:
       fc1:
-        type: fc
-        out_size: 1024
-      fc2:
-        type: fc
-        out_size: 512
+         type: fc
+         out_size: 10
+#       fc2:
+#         type: fc
+#         out_size: 10
       fc3:
         type: fc
         final_layer: True
-        out_size: 64
+        out_size: 1
 
