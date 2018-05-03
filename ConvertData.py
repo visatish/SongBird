@@ -2,7 +2,7 @@ import pickle as pkl
 import os
 import json
 
-DATA_DIR = 'Data' 
+DATA_DIR = 'Data'
 OUT_FILE_SSET_PKL = 'song_set.pkl'
 OUT_FILE_SSET_JSON = 'song_set.json'
 OUT_FILE_PSET_PKL = 'playlist_set.pkl'
@@ -17,7 +17,7 @@ all_fnames = os.listdir(DATA_DIR)
 playlists = []
 for fname in all_fnames:
     with open(os.path.join(DATA_DIR, fname), 'r') as fhandle:
-        playlists.append(fhandle.read().split('\n')) 
+        playlists.append(fhandle.read().split('\n'))
 
 for p in range(len(playlists)):
     for s in playlists[p]:
